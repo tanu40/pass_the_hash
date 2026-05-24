@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>CTF: Hunt for Pass-the-Hash | Lateral Movement Detection</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', 'Fira Code', system-ui, monospace;
+    }
+    body {
+      background: linear-gradient(160deg, #0a0a1a 0%, #0f0f2e 50%, #0a0a1a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      margin: 0;
+    }
+    .container {
+      max-width: 1200px;
+      width: 100%;
+      background: rgba(15, 15, 40, 0.9);
+      backdrop-filter: blur(28px);
+      border: 1px solid rgba(0, 200, 255, 0.35);
+      box-shadow: 0 25px 50px rgba(0, 150, 255, 0.2);
+      border-radius: 2.8rem;
+      padding: 2rem;
+      color: #c8e0ff;
+      transition: all 0.3s ease;
+    }
+    h1 {
+      font-size: 2.3rem;
+      font-weight: 700;
+      text-align: center;
+      background: linear-gradient(135deg, #5ec8ff, #0066ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.4rem;
+      letter-spacing: 1px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #8ab0d4;
+      margin-bottom: 1.8rem;
+      border-bottom: 1px dashed #2a3d5a;
+      padding-bottom: 1rem;
+      font-style: italic;
+    }
+    .panel {
+      background: rgba(10, 10, 30, 0.8);
+      backdrop-filter: blur(12px);
+      border-radius: 1.8rem;
+      padding: 1.7rem;
+      border: 1px solid #2a3d5a;
+      margin-bottom: 1.8rem;
+    }
+    .hidden { display: none !important; }
+    .flex-row { display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center; }
+    input, button, select {
+      background: #0d0d28; border: 1px solid #3a5080;
+      border-radius: 2rem; padding: 0.7rem 1.3rem;
+      color: #d4e4ff; font-weight: 500; outline: none;
+      transition: 0.2s; font-size: 0.9rem;
+    }
+    input:focus, select:focus { border-color: #4da6ff; box-shadow: 0 0 14px #3366ff; }
+    button {
+      background: #1a2050; border-color: #4d80cc; cursor: pointer;
+      font-weight: bold; display: inline-flex; align-items: center; gap: 0.3rem;
+    }
+    button:hover { background: #253380; border-color: #66a3ff; box-shadow: 0 0 18px #3366ff; }
+    .task-card {
+      background: #0a0a22; border-left: 6px solid #4da6ff;
+      padding: 1.2rem; border-radius: 1.3rem; margin: 1.2rem 0;
+      animation: fadeIn 0.35s ease;
+    }
+    @keyframes fadeIn {
+      0% { opacity: 0; transform: translateY(8px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .log-line {
+      background: #05051a; border: 1px solid #2a3d5a;
+      padding: 0.5rem 1rem; border-radius: 0.6rem; margin: 0.4rem 0;
+      font-family: 'Fira Code', monospace; font-size: 0.78rem;
+      white-space: pre-wrap; color: #b8d4ff;
+    }
+    .badge { background: #1a2d50; padding: 0.2rem 0.9rem; border-radius: 20px; font-size: 0.8rem; }
+    .network-map {
+      background: #05051a; border: 2px solid #2a4a7a;
+      border-radius: 1.5rem; padding: 1.5rem; margin: 1rem 0;
+      position: relative; min-height: 300px; overflow: hidden;
+    }
+    .network-node {
+      position: absolute; width: 50px; height: 50px; border-radius: 50%;
+      background: #1a3050; border: 2px solid #4da6ff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: bold; color: #c8e0ff;
+      transition: all 0.5s ease; cursor: pointer; z-index: 2;
+    }
+    .network-node.compromised { background: #501a1a; border-color: #ff4444; animation: pulseRed 1.5s infinite; }
+    .network-node.attacker { background: #502000; border-color: #ff8800; animation: pulseOrange 1.5s infinite; }
+    @keyframes pulseRed {
+      0%, 100% { box-shadow: 0 0 5px #ff4444; }
+      50% { box-shadow: 0 0 25px #ff0000; }
+    }
+    @keyframes pulseOrange {
+      0%, 100% { box-shadow: 0 0 5px #ff8800; }
+      50% { box-shadow: 0 0 25px #ff6600; }
+    }
+    .connection-line {
+      position: absolute; height: 2px; background: #4da6ff;
+      transform-origin: left center; z-index: 1; opacity: 0.6;
+    }
+    .connection-line.active { background: #ff4444; opacity: 1; animation: dashMove 1s linear infinite; }
+    @keyframes dashMove { to { stroke-dashoffset: -20; } }
+    .query-builder {
+      background: #05051a; border: 2px solid #2a4a7a;
+      border-radius: 1.2rem; padding: 1rem; margin: 1rem 0;
+      min-height: 80px; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+    }
+    .query-part {
+      background: #1a2d50; border: 1px solid #4da6ff;
+      padding: 0.4rem 0.8rem; border-radius: 1.5rem;
+      font-size: 0.8rem; cursor: grab; user-select: none; transition: 0.2s;
+    }
+    .query-part:hover { background: #2a4080; border-color: #66a3ff; }
+    .query-part.dragging { opacity: 0.5; cursor: grabbing; }
+    .query-slot {
+      background: #0d0d28; border: 2px dashed #3a5080;
+      padding: 0.4rem 0.8rem; border-radius: 1.5rem;
+      min-width: 100px; text-align: center; font-size: 0.8rem; color: #6a8ab0; transition: 0.3s;
+    }
+    .query-slot.filled { border-color: #4da6ff; background: #1a2d50; color: #c8e0ff; }
+    .flag-box {
+      background: #0a0a30; border: 2px dashed #ffd700;
+      padding: 0.9rem; border-radius: 20px; text-align: center;
+      font-weight: bold; font-size: 1.4rem; letter-spacing: 3px;
+      color: #ffd700; animation: glowGold 1.7s infinite;
+    }
+    @keyframes glowGold {
+      0% { box-shadow: 0 0 5px #ffd700; }
+      50% { box-shadow: 0 0 30px #ffaa00; }
+      100% { box-shadow: 0 0 5px #ffd700; }
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
+    th { text-align: left; color: #6ab0ff; border-bottom: 1px solid #2a3d5a; padding: 0.4rem; }
+    td { padding: 0.4rem; border-bottom: 1px solid #1a2a3d; }
+    .status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    .toast {
+      position: fixed; top: 20px; right: 20px;
+      background: #1a1a40; border: 1px solid #4da6ff;
+      padding: 1rem 1.5rem; border-radius: 2rem;
+      color: #b8d4ff; font-weight: bold; z-index: 9999;
+      animation: slideIn 0.3s ease, fadeOut 0.3s 2.5s forwards;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
+    code { background: #0d0d28; padding: 0.2rem 0.6rem; border-radius: 12px; font-family: 'Fira Code', monospace; }
+  </style>
+</head>
+<body>
+<div class="container" id="appContainer">
+  <div id="loginSection">
+    <h1>🕸️ PtH HUNTER CTF</h1>
+    <div class="subtitle">Pass-the-Hash Detection · Event 4624 Logon Type 3 · Zeek NTLM</div>
+    <div class="panel">
+      <div class="flex-row" style="justify-content: center;">
+        <button id="studentLoginBtn">🎓 Student Access</button>
+        <button id="adminLoginBtn">🛡️ Admin Panel</button>
+      </div>
+      <div id="studentLoginForm" class="hidden" style="margin-top:1.6rem; text-align:center;">
+        <input type="text" id="studentNameInput" placeholder="Your full name" autocomplete="off" style="width:70%;">
+        <input type="password" id="studentPassInput" placeholder="Student batch password" style="width:70%; margin-top:0.7rem;">
+        <button id="studentSubmitLogin" style="margin-top:0.8rem;">🔐 Enter CTF</button>
+        <p style="font-size:0.8rem; color:#8ab0d4; margin-top:0.5rem;">Default password: <code>pth2025</code></p>
+      </div>
+      <div id="adminLoginForm" class="hidden" style="margin-top:1.6rem; text-align:center;">
+        <input type="password" id="adminPassInput" placeholder="Admin password">
+        <button id="adminSubmitLogin" style="margin-top:0.8rem;">🔑 Admin Login</button>
+        <p style="font-size:0.8rem; color:#8ab0d4; margin-top:0.5rem;">Default admin: <code>admin123</code></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="studentDashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="color:#5ec8ff;">👤 <span id="displayStudentName"></span></h2>
+      <button id="logoutStudentBtn">🚪 Logout</button>
+    </div>
+    <div id="taskContainer"></div>
+  </div>
+
+  <div id="adminDashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between;">
+      <h2 style="color:#6ab0ff;">🛡️ ADMINISTRATOR</h2>
+      <button id="logoutAdminBtn">Exit</button>
+    </div>
+    <div class="panel">
+      <h3>🔐 Student Batch Password</h3>
+      <p style="font-size:0.8rem; color:#8ab0d4; margin-bottom:0.5rem;">Current: <code id="currentStudentPassDisplay"></code></p>
+      <div class="flex-row">
+        <input type="text" id="newStudentPassword" placeholder="New student password">
+        <button id="updateStudentPasswordBtn">Update</button>
+      </div>
+      <hr style="border-color:#2a3d5a; margin:1.2rem 0;">
+      <h3>🔑 Change Admin Password</h3>
+      <p style="font-size:0.8rem; color:#8ab0d4; margin-bottom:0.5rem;">Current: <code id="currentAdminPassDisplay"></code></p>
+      <div class="flex-row">
+        <input type="password" id="newAdminPassword" placeholder="New admin password">
+        <button id="updateAdminPasswordBtn">Update</button>
+      </div>
+      <hr style="border-color:#2a3d5a; margin:1.2rem 0;">
+      <h3>📋 Student Progress</h3>
+      <div id="adminStudentList"></div>
+      <button id="resetAllProgressBtn" style="background:#3a1a1a; border-color:#aa3030; margin-top:1rem;">⚠️ Reset All Student Progress</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+    const ADMIN_PASS_KEY = 'pth_admin_pass_v3';
+    const STUDENT_PASS_KEY = 'pth_student_pass_v3';
+    const STUDENTS_DB_KEY = 'pth_students_db_v3';
+    const INITIALIZED_KEY = 'pth_initialized_v3';
+    const DEFAULT_ADMIN_PASS = 'admin123';
+    const DEFAULT_STUDENT_PASS = 'pth2025';
+
+    function initializeStorage() {
+      if (!localStorage.getItem(INITIALIZED_KEY)) {
+        if (!localStorage.getItem(ADMIN_PASS_KEY)) localStorage.setItem(ADMIN_PASS_KEY, DEFAULT_ADMIN_PASS);
+        if (!localStorage.getItem(STUDENT_PASS_KEY)) localStorage.setItem(STUDENT_PASS_KEY, DEFAULT_STUDENT_PASS);
+        if (!localStorage.getItem(STUDENTS_DB_KEY)) localStorage.setItem(STUDENTS_DB_KEY, JSON.stringify([]));
+        localStorage.setItem(INITIALIZED_KEY, 'true');
+      }
+    }
+    initializeStorage();
+
+    let currentUser = null;
+    let adminActive = false;
+
+    const tasks = [
+      { id: 1, title: "🎯 Task 1: Hunting Hypothesis", desc: "Select the correct hypothesis for Pass-the-Hash detection:", answer: "same account multiple machines", extra: "hypothesis" },
+      { id: 2, title: "🔍 Task 2: Identify Suspicious Logon", desc: "From the 4624 logs below, which account shows lateral movement? (username)", answer: "svc_backup", extra: "logs4624" },
+      { id: 3, title: "🖥️ Task 3: Correlate with Zeek NTLM", desc: "From Zeek ntlm.log, what is the source workstation IP of the suspicious auth?", answer: "10.0.1.50", extra: "zeekLogs" },
+      { id: 4, title: "⚖️ Task 4: Service Account Check", desc: "Is 'svc_backup' a legitimate service account? (check whitelist)", answer: "no", extra: "whitelist" },
+      { id: 5, title: "🛡️ Task 5: Containment Action", desc: "What is the FIRST containment step? (exact phrase)", answer: "disable account" }
+    ];
+
+    const logonEvents = [
+      { time: "14:23:01", user: "svc_backup", source: "10.0.1.50", target: "SRV-DC01", type: 3 },
+      { time: "14:23:15", user: "svc_backup", source: "10.0.1.50", target: "SRV-FILE01", type: 3 },
+      { time: "14:23:28", user: "svc_backup", source: "10.0.1.50", target: "SRV-SQL01", type: 3 },
+      { time: "14:23:42", user: "svc_backup", source: "10.0.1.50", target: "SRV-WEB01", type: 3 },
+      { time: "14:23:55", user: "svc_backup", source: "10.0.1.50", target: "SRV-EXCH01", type: 3 },
+      { time: "14:30:00", user: "jdoe", source: "10.0.1.100", target: "SRV-FILE01", type: 3 },
+      { time: "14:31:00", user: "asmith", source: "10.0.1.101", target: "SRV-WEB01", type: 3 }
+    ];
+    const zeekNtlmLogs = [
+      "ntlm: 10.0.1.50 -> SRV-DC01 | user:svc_backup | status:success",
+      "ntlm: 10.0.1.50 -> SRV-FILE01 | user:svc_backup | status:success",
+      "ntlm: 10.0.1.50 -> SRV-SQL01 | user:svc_backup | status:success",
+      "ntlm: 10.0.1.50 -> SRV-WEB01 | user:svc_backup | status:success",
+      "ntlm: 10.0.1.50 -> SRV-EXCH01 | user:svc_backup | status:success"
+    ];
+    const serviceAccountWhitelist = ["svc_sqlagent", "svc_webpool", "svc_exchange", "svc_scan"];
+
+    function getStudents() { try { return JSON.parse(localStorage.getItem(STUDENTS_DB_KEY) || '[]'); } catch(e) { return []; } }
+    function saveStudents(arr) { localStorage.setItem(STUDENTS_DB_KEY, JSON.stringify(arr)); }
+    function getStudentPassword() { return localStorage.getItem(STUDENT_PASS_KEY) || DEFAULT_STUDENT_PASS; }
+    function getAdminPassword() { return localStorage.getItem(ADMIN_PASS_KEY) || DEFAULT_ADMIN_PASS; }
+
+    function showToast(message, isError = false) {
+      const existing = document.querySelector('.toast');
+      if (existing) existing.remove();
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.style.background = isError ? '#3a1a1a' : '#1a1a40';
+      toast.style.borderColor = isError ? '#aa3030' : '#4da6ff';
+      toast.style.color = isError ? '#ffaaaa' : '#b8d4ff';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3000);
+    }
+
+    function updateCompletion(name, taskId) {
+      let students = getStudents();
+      let s = students.find(s => s.name.toLowerCase() === name.toLowerCase());
+      if (s && !s.completedTasks.includes(taskId)) {
+        s.completedTasks.push(taskId);
+        saveStudents(students);
+        if (currentUser && currentUser.name.toLowerCase() === name.toLowerCase()) {
+          currentUser.completedTasks = [...s.completedTasks];
+        }
+        return true;
+      }
+      return false;
+    }
+
+    function createQueryBuilder() {
+      const queryParts = ['EventID=4624','LogonType=3','same_user','multiple_targets','time_window<2min','| stats count by user','| where count > 3'];
+      let html = '<p style="margin-bottom:0.5rem; color:#8ab0d4;">🧩 Interactive Query Builder (drag parts to build detection query):</p>';
+      html += '<div style="display:flex; gap:1rem; flex-wrap:wrap;">';
+      html += '<div style="flex:1; min-width:200px;"><p style="font-size:0.75rem; color:#6a8ab0;">Available Parts:</p>';
+      html += '<div class="query-builder" id="queryParts">';
+      queryParts.forEach((part, i) => { html += `<span class="query-part" draggable="true" data-part="${part}" id="part${i}">${part}</span>`; });
+      html += '</div></div>';
+      html += '<div style="flex:1; min-width:200px;"><p style="font-size:0.75rem; color:#6a8ab0;">Your Query:</p>';
+      html += '<div class="query-builder" id="queryDropZone" style="min-height:100px;"><span class="query-slot" id="querySlot">Drop parts here...</span></div></div></div>';
+      return html;
+    }
+
+    function initDragAndDrop() {
+      document.querySelectorAll('.query-part').forEach(part => {
+        part.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', e.target.dataset.part); e.target.classList.add('dragging'); });
+        part.addEventListener('dragend', (e) => { e.target.classList.remove('dragging'); });
+      });
+      const dropZone = document.getElementById('queryDropZone');
+      if (dropZone) {
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#66a3ff'; });
+        dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#3a5080'; });
+        dropZone.addEventListener('drop', (e) => {
+          e.preventDefault(); dropZone.style.borderColor = '#3a5080';
+          const data = e.dataTransfer.getData('text/plain');
+          const slot = document.getElementById('querySlot');
+          if (slot && data) { slot.textContent = data; slot.classList.add('filled'); showToast('🧩 Query part added: ' + data); }
+        });
+      }
+    }
+
+    function createNetworkMap() {
+      const nodes = [
+        { id: 'attacker', x: 15, y: 40, label: '10.0.1.50\n🦹', class: 'attacker' },
+        { id: 'dc01', x: 45, y: 15, label: 'SRV-DC01', class: 'compromised' },
+        { id: 'file01', x: 65, y: 30, label: 'SRV-FILE01', class: 'compromised' },
+        { id: 'sql01', x: 75, y: 55, label: 'SRV-SQL01', class: 'compromised' },
+        { id: 'web01', x: 55, y: 70, label: 'SRV-WEB01', class: 'compromised' },
+        { id: 'exch01', x: 35, y: 65, label: 'SRV-EXCH01', class: 'compromised' }
+      ];
+      let html = '<p style="margin-bottom:0.5rem; color:#8ab0d4;">🌐 Lateral Movement Network Map (animated):</p>';
+      html += '<div class="network-map" style="position:relative; min-height:280px;">';
+      nodes.forEach(node => {
+        if (node.id !== 'attacker') {
+          const an = nodes[0];
+          const dx = node.x - an.x, dy = node.y - an.y;
+          const length = Math.sqrt(dx*dx+dy*dy);
+          const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+          html += `<div class="connection-line active" style="left:${an.x}%; top:${an.y}%; width:${length}%; transform:rotate(${angle}deg);"></div>`;
+        }
+      });
+      nodes.forEach(node => {
+        html += `<div class="network-node ${node.class||''}" style="left:${node.x}%; top:${node.y}%;" title="${node.label.replace('\n',' ')}">${node.label.split('\n')[0]}</div>`;
+      });
+      html += '</div>';
+      return html;
+    }
+
+    function renderTasks() {
+      if (!currentUser) return;
+      document.getElementById('displayStudentName').innerText = currentUser.name;
+      const container = document.getElementById('taskContainer');
+      const completed = currentUser.completedTasks || [];
+      let html = '<h3 style="margin-bottom:1rem;">🕸️ Pass-the-Hash Investigation Dashboard</h3>';
+      html += createNetworkMap();
+      html += '<p style="font-size:0.75rem; color:#8ab0d4; margin-bottom:1rem;">🔴 Red nodes = compromised | 🟠 Orange = attacker source</p>';
+      html += createQueryBuilder();
+      tasks.forEach(task => {
+        const done = completed.includes(task.id);
+        html += `<div class="task-card" style="border-left-color: ${done ? '#2ecc71' : '#4da6ff'};">`;
+        html += `<strong>${task.title}</strong> <span class="badge">${done ? '✅ Complete' : '🔒 Pending'}</span>`;
+        html += `<p style="margin:0.4rem 0;">${task.desc}</p>`;
+        if (task.extra === 'hypothesis') {
+          html += '<div style="display:flex; flex-direction:column; gap:0.3rem; margin:0.5rem 0;">';
+          ["same account multiple machines","single failed logon attempt","normal user activity","service restart event"].forEach(opt => {
+            html += `<label style="cursor:pointer; padding:0.3rem 0.5rem; border-radius:1rem; background:#0d0d28; border:1px solid #2a3d5a;"><input type="radio" name="hypothesis" value="${opt}" ${done?'disabled':''}> ${opt}</label>`;
+          });
+          html += '</div>';
+          if (!done) html += '<button onclick="submitHypothesis()" style="margin-top:0.5rem;">✅ Submit Hypothesis</button>';
+        } else if (task.extra === 'logs4624') {
+          html += '<div class="log-line">📋 Windows Event 4624 (Logon Type 3 - Network):</div>';
+          logonEvents.forEach(e => {
+            const sus = e.user === 'svc_backup' && e.time.startsWith('14:23');
+            html += `<div class="log-line" style="${sus?'border-left:3px solid #ff4444;':''}">⏰ ${e.time} | 👤 ${e.user} | 🖥️ ${e.source} → ${e.target} | Type:${e.type} ${sus?'⚠️':''}</div>`;
+          });
+        } else if (task.extra === 'zeekLogs') {
+          html += '<div class="log-line">📡 Zeek ntlm.log entries:</div>';
+          zeekNtlmLogs.forEach(l => { html += `<div class="log-line" style="border-left:3px solid #ff8800;">${l}</div>`; });
+        } else if (task.extra === 'whitelist') {
+          html += '<div class="log-line">📋 Service Account Whitelist:</div>';
+          html += `<div class="log-line">✅ ${serviceAccountWhitelist.join(', ')}</div>`;
+          html += '<div class="log-line" style="border-left:3px solid #ff4444;">🔍 Checking: <b>svc_backup</b> → <span style="color:#ff6666;">NOT FOUND in whitelist</span></div>';
+        }
+        if (!done && task.extra !== 'hypothesis') {
+          html += `<div style="display:flex; gap:0.5rem; margin-top:0.5rem;"><input type="text" id="answerInput${task.id}" placeholder="Your answer" style="flex:1;"><button onclick="submitTask(${task.id})">✅ Submit</button></div>`;
+        } else if (done) { html += '<p style="color:#9effb7; font-weight:bold;">✔ Task Completed Successfully</p>'; }
+        html += '</div>';
+      });
+      if (completed.length === tasks.length) {
+        html += '<div class="flag-box">🏆 FLAG{PASS_THE_HASH_HUNT} 🏆</div>';
+        html += '<p style="text-align:center; color:#ffd700;">🎉 Pass-the-Hash lateral movement detected and contained!</p>';
+      }
+      container.innerHTML = html;
+      setTimeout(initDragAndDrop, 100);
+    }
+
+    window.submitHypothesis = function() {
+      if (!currentUser) return;
+      const sel = document.querySelector('input[name="hypothesis"]:checked');
+      if (!sel) { showToast('Select a hypothesis.', true); return; }
+      if (sel.value === tasks[0].answer) { updateCompletion(currentUser.name, 1); showToast('✅ Correct hypothesis!'); renderTasks(); }
+      else { showToast('❌ Incorrect hypothesis.', true); }
+    };
+
+    window.submitTask = function(taskId) {
+      if (!currentUser) return;
+      const input = document.getElementById(`answerInput${taskId}`);
+      if (!input) return;
+      const ans = input.value.trim();
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+      if (ans.toLowerCase() === task.answer.toLowerCase()) {
+        updateCompletion(currentUser.name, taskId);
+        showToast('✅ Correct!'); renderTasks();
+      } else {
+        showToast('❌ Incorrect.', true);
+        input.style.animation = 'shake 0.5s ease';
+        setTimeout(() => { input.style.animation = ''; }, 500);
+      }
+    };
+
+    function renderAdminList() {
+      const students = getStudents();
+      const cont = document.getElementById('adminStudentList');
+      if (!cont) return;
+      document.getElementById('currentStudentPassDisplay').textContent = getStudentPassword();
+      document.getElementById('currentAdminPassDisplay').textContent = getAdminPassword();
+      if (students.length === 0) { cont.innerHTML = '<p style="color:#8ab0d4;">📭 No students yet.</p>'; return; }
+      let html = '<table><tr><th>Student</th><th>Done</th><th>Progress</th><th>Status</th></tr>';
+      students.forEach(s => {
+        const cnt = (s.completedTasks||[]).length;
+        const pct = Math.round((cnt/tasks.length)*100);
+        const sc = cnt===tasks.length?'#2ecc71':cnt>0?'#f39c12':'#e74c3c';
+        html += `<tr><td>${escapeHtml(s.name)}</td><td>${cnt}/${tasks.length}</td><td><div style="background:#0d0d28; border-radius:10px; height:8px; width:100px;"><div style="width:${pct}%; height:100%; background:${sc};"></div></div></td><td><span class="status-indicator" style="background:${sc};"></span>${cnt===tasks.length?'Flag':'In Progress'}</td></tr>`;
+      });
+      html += '</table>'; cont.innerHTML = html;
+    }
+
+    function escapeHtml(t) { return String(t).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[m]); }
+    function showLogin() {
+      ['loginSection'].forEach(id => document.getElementById(id).classList.remove('hidden'));
+      ['studentDashboard','adminDashboard','studentLoginForm','adminLoginForm'].forEach(id => document.getElementById(id).classList.add('hidden'));
+      currentUser = null; adminActive = false;
+    }
+    function showStudentDash() {
+      ['loginSection','adminDashboard'].forEach(id => document.getElementById(id).classList.add('hidden'));
+      document.getElementById('studentDashboard').classList.remove('hidden');
+      renderTasks();
+    }
+    function showAdminDash() {
+      ['loginSection','studentDashboard'].forEach(id => document.getElementById(id).classList.add('hidden'));
+      document.getElementById('adminDashboard').classList.remove('hidden');
+      renderAdminList();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('studentLoginBtn').addEventListener('click', () => {
+        document.getElementById('studentLoginForm').classList.remove('hidden');
+        document.getElementById('adminLoginForm').classList.add('hidden');
+      });
+      document.getElementById('adminLoginBtn').addEventListener('click', () => {
+        document.getElementById('adminLoginForm').classList.remove('hidden');
+        document.getElementById('studentLoginForm').classList.add('hidden');
+      });
+      document.getElementById('studentSubmitLogin').addEventListener('click', () => {
+        const name = document.getElementById('studentNameInput').value.trim();
+        const pass = document.getElementById('studentPassInput').value.trim();
+        if (!name||!pass) { showToast('Enter name and password.', true); return; }
+        if (pass !== getStudentPassword()) { showToast('Invalid password.', true); return; }
+        let students = getStudents();
+        let stu = students.find(s => s.name.toLowerCase() === name.toLowerCase());
+        if (!stu) { stu = {name, completedTasks:[]}; students.push(stu); saveStudents(students); showToast(`Welcome, ${name}!`); }
+        else { showToast(`Welcome back, ${name}!`); }
+        currentUser = {name: stu.name, completedTasks: [...stu.completedTasks]};
+        document.getElementById('studentNameInput').value = '';
+        document.getElementById('studentPassInput').value = '';
+        showStudentDash();
+      });
+      document.getElementById('adminSubmitLogin').addEventListener('click', () => {
+        if (document.getElementById('adminPassInput').value.trim() === getAdminPassword()) {
+          adminActive = true; document.getElementById('adminPassInput').value = '';
+          showToast('Admin access granted.'); showAdminDash();
+        } else { showToast('Invalid admin password.', true); }
+      });
+      document.getElementById('logoutStudentBtn').addEventListener('click', () => { showToast('Logged out.'); showLogin(); });
+      document.getElementById('logoutAdminBtn').addEventListener('click', () => { showToast('Admin logged out.'); showLogin(); });
+      document.getElementById('updateStudentPasswordBtn').addEventListener('click', () => {
+        if (!adminActive) return;
+        const np = document.getElementById('newStudentPassword').value.trim();
+        if (!np) { showToast('Enter password.', true); return; }
+        localStorage.setItem(STUDENT_PASS_KEY, np);
+        showToast('✅ Student password updated!');
+        document.getElementById('newStudentPassword').value = ''; renderAdminList();
+      });
+      document.getElementById('updateAdminPasswordBtn').addEventListener('click', () => {
+        if (!adminActive) return;
+        const np = document.getElementById('newAdminPassword').value.trim();
+        if (!np) { showToast('Enter password.', true); return; }
+        localStorage.setItem(ADMIN_PASS_KEY, np);
+        showToast('✅ Admin password changed!');
+        document.getElementById('newAdminPassword').value = ''; renderAdminList();
+      });
+      document.getElementById('resetAllProgressBtn').addEventListener('click', () => {
+        if (!adminActive) return;
+        if (confirm('Reset all student progress?')) { saveStudents([]); showToast('Progress reset.'); renderAdminList(); }
+      });
+      const s = document.createElement('style');
+      s.textContent = '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}';
+      document.head.appendChild(s);
+      showLogin();
+    });
+})();
+</script>
+</body>
+</html>
