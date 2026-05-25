@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>CTF: Hunt for Pass-the-Hash | Lateral Movement Detection</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', 'Fira Code', system-ui, monospace; }
+    body {
+      background: linear-gradient(160deg, #0a0a1a 0%, #0f0f2e 50%, #0a0a1a 100%);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem; margin: 0;
+    }
+    .container {
+      max-width: 1200px; width: 100%; background: rgba(15, 15, 40, 0.9);
+      backdrop-filter: blur(28px); border: 1px solid rgba(0, 200, 255, 0.35);
+      box-shadow: 0 25px 50px rgba(0, 150, 255, 0.2); border-radius: 2.8rem;
+      padding: 2rem; color: #c8e0ff;
+    }
+    h1 { font-size: 2.3rem; font-weight: 700; text-align: center; background: linear-gradient(135deg, #5ec8ff, #0066ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.4rem; letter-spacing: 1px; }
+    .subtitle { text-align: center; color: #8ab0d4; margin-bottom: 1.8rem; border-bottom: 1px dashed #2a3d5a; padding-bottom: 1rem; font-style: italic; }
+    .panel { background: rgba(10, 10, 30, 0.8); backdrop-filter: blur(12px); border-radius: 1.8rem; padding: 1.7rem; border: 1px solid #2a3d5a; margin-bottom: 1.8rem; }
+    .hidden { display: none !important; }
+    input, button { background: #0d0d28; border: 1px solid #3a5080; border-radius: 2rem; padding: 0.7rem 1.3rem; color: #d4e4ff; font-weight: 500; outline: none; font-size: 0.9rem; }
+    input:focus { border-color: #4da6ff; box-shadow: 0 0 14px #3366ff; }
+    button { background: #1a2050; border-color: #4d80cc; cursor: pointer; font-weight: bold; display: inline-flex; align-items: center; gap: 0.3rem; }
+    button:hover { background: #253380; border-color: #66a3ff; box-shadow: 0 0 18px #3366ff; }
+    .task-card { background: #0a0a22; border-left: 6px solid #4da6ff; padding: 1.2rem; border-radius: 1.3rem; margin: 1.2rem 0; animation: fadeIn 0.35s ease; }
+    @keyframes fadeIn { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+    .log-line { background: #05051a; border: 1px solid #2a3d5a; padding: 0.5rem 1rem; border-radius: 0.6rem; margin: 0.4rem 0; font-family: 'Fira Code', monospace; font-size: 0.78rem; white-space: pre-wrap; color: #b8d4ff; }
+    .badge { background: #1a2d50; padding: 0.2rem 0.9rem; border-radius: 20px; font-size: 0.8rem; }
+    .network-map { background: #05051a; border: 2px solid #2a4a7a; border-radius: 1.5rem; padding: 1.5rem; margin: 1rem 0; position: relative; min-height: 280px; overflow: hidden; }
+    .network-node { position: absolute; width: 50px; height: 50px; border-radius: 50%; background: #1a3050; border: 2px solid #4da6ff; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: bold; color: #c8e0ff; z-index: 2; }
+    .network-node.compromised { background: #501a1a; border-color: #ff4444; animation: pulseRed 1.5s infinite; }
+    .network-node.attacker { background: #502000; border-color: #ff8800; animation: pulseOrange 1.5s infinite; }
+    @keyframes pulseRed { 0%,100%{box-shadow:0 0 5px #ff4444} 50%{box-shadow:0 0 25px #ff0000} }
+    @keyframes pulseOrange { 0%,100%{box-shadow:0 0 5px #ff8800} 50%{box-shadow:0 0 25px #ff6600} }
+    .connection-line { position: absolute; height: 2px; background: #4da6ff; transform-origin: left center; z-index: 1; opacity: 0.6; }
+    .connection-line.active { background: #ff4444; opacity: 1; animation: dashMove 1s linear infinite; }
+    @keyframes dashMove { to { stroke-dashoffset: -20; } }
+    .query-builder { background: #05051a; border: 2px solid #2a4a7a; border-radius: 1.2rem; padding: 1rem; margin: 1rem 0; min-height: 80px; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .query-part { background: #1a2d50; border: 1px solid #4da6ff; padding: 0.4rem 0.8rem; border-radius: 1.5rem; font-size: 0.8rem; cursor: grab; user-select: none; }
+    .query-part:hover { background: #2a4080; border-color: #66a3ff; }
+    .query-slot { background: #0d0d28; border: 2px dashed #3a5080; padding: 0.4rem 0.8rem; border-radius: 1.5rem; min-width: 100px; text-align: center; font-size: 0.8rem; color: #6a8ab0; }
+    .query-slot.filled { border-color: #4da6ff; background: #1a2d50; color: #c8e0ff; }
+    .flag-box { background: #0a0a30; border: 2px dashed #ffd700; padding: 0.9rem; border-radius: 20px; text-align: center; font-weight: bold; font-size: 1.4rem; letter-spacing: 3px; color: #ffd700; animation: glowGold 1.7s infinite; }
+    @keyframes glowGold { 0%{box-shadow:0 0 5px #ffd700} 50%{box-shadow:0 0 30px #ffaa00} 100%{box-shadow:0 0 5px #ffd700} }
+    .success-msg { color: #9effb7; font-weight: bold; }
+    .toast { position: fixed; top: 20px; right: 20px; background: #1a1a40; border: 1px solid #4da6ff; padding: 1rem 1.5rem; border-radius: 2rem; color: #b8d4ff; font-weight: bold; z-index: 9999; animation: slideIn 0.3s ease, fadeOut 0.3s 2.5s forwards; }
+    @keyframes slideIn { from{transform:translateX(100px);opacity:0} to{transform:translateX(0);opacity:1} }
+    @keyframes fadeOut { to{opacity:0;transform:translateY(-10px)} }
+    code { background: #0d0d28; padding: 0.2rem 0.6rem; border-radius: 12px; font-family: 'Fira Code', monospace; }
+  </style>
+</head>
+<body>
+<div class="container" id="appContainer">
+
+  <div id="loginSection">
+    <h1>🕸️ PtH HUNTER CTF</h1>
+    <div class="subtitle">Pass-the-Hash Detection · Event 4624 Logon Type 3 · Zeek NTLM</div>
+    <div class="panel">
+      <div style="text-align:center;">
+        <input type="text" id="studentNameInput" placeholder="Enter your name" autocomplete="off" style="width:70%;">
+        <input type="password" id="studentPassInput" placeholder="Enter password" style="width:70%; margin-top:0.7rem;">
+        <button id="studentSubmitLogin" style="margin-top:0.8rem;">🔐 Enter CTF Lab</button>
+        <p style="font-size:0.8rem; color:#8ab0d4; margin-top:0.5rem;">
+          Password: <code>45_2026</code>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div id="studentDashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="color:#5ec8ff;">👤 <span id="displayStudentName"></span></h2>
+      <button id="logoutStudentBtn">🚪 Logout</button>
+    </div>
+    <div id="taskContainer"></div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+    const FIXED_PASSWORD = '45_2026';
+    const STORAGE_KEY = 'pth_ctf_progress';
+    
+    let currentUser = null;
+    let completedTasks = [];
+
+    function loadProgress() {
+        try { const s=localStorage.getItem(STORAGE_KEY); if(s){const d=JSON.parse(s); completedTasks=d.completed||[]; return d.name; } } catch(e) {}
+        return null;
+    }
+    function saveProgress() { if(currentUser) localStorage.setItem(STORAGE_KEY, JSON.stringify({name:currentUser.name, completed:currentUser.completedTasks})); }
+
+    const tasks = [
+      { id: 1, title: "🎯 Task 1: Hunting Hypothesis", desc: "Select the correct hypothesis for Pass-the-Hash detection:", answer: "same account multiple machines", extra: "hypothesis" },
+      { id: 2, title: "🔍 Task 2: Suspicious Logon", desc: "Which account shows lateral movement?", answer: "svc_backup", extra: "logs4624" },
+      { id: 3, title: "🖥️ Task 3: Zeek NTLM Correlation", desc: "What is the source workstation IP?", answer: "10.0.1.50", extra: "zeekLogs" },
+      { id: 4, title: "⚖️ Task 4: Service Account Check", desc: "Is 'svc_backup' legitimate? (yes/no)", answer: "no", extra: "whitelist" },
+      { id: 5, title: "🛡️ Task 5: Containment", desc: "First containment step?", answer: "disable account" }
+    ];
+
+    const logonEvents = [
+      "14:23:01 | svc_backup | 10.0.1.50 → SRV-DC01",
+      "14:23:15 | svc_backup | 10.0.1.50 → SRV-FILE01",
+      "14:23:28 | svc_backup | 10.0.1.50 → SRV-SQL01",
+      "14:23:42 | svc_backup | 10.0.1.50 → SRV-WEB01",
+      "14:23:55 | svc_backup | 10.0.1.50 → SRV-EXCH01",
+      "14:30:00 | jdoe | 10.0.1.100 → SRV-FILE01"
+    ];
+    const whitelist = ["svc_sqlagent", "svc_webpool", "svc_exchange", "svc_scan"];
+
+    function showToast(m, e) {
+      const x=document.querySelector('.toast'); if(x)x.remove();
+      const t=document.createElement('div'); t.className='toast';
+      t.style.background=e?'#3a1a1a':'#1a1a40'; t.style.borderColor=e?'#aa3030':'#4da6ff';
+      t.style.color=e?'#ffaaaa':'#b8d4ff'; t.textContent=m;
+      document.body.appendChild(t); setTimeout(()=>{if(t.parentNode)t.remove();},3000);
+    }
+
+    function createNetworkMap() {
+      const nodes = [
+        { id: 'attacker', x: 15, y: 40, label: '10.0.1.50', class: 'attacker' },
+        { id: 'dc01', x: 45, y: 15, label: 'DC01', class: 'compromised' },
+        { id: 'file01', x: 65, y: 30, label: 'FILE01', class: 'compromised' },
+        { id: 'sql01', x: 75, y: 55, label: 'SQL01', class: 'compromised' },
+        { id: 'web01', x: 55, y: 70, label: 'WEB01', class: 'compromised' },
+        { id: 'exch01', x: 35, y: 65, label: 'EXCH01', class: 'compromised' }
+      ];
+      let h = '<div class="network-map" style="position:relative; min-height:280px;">';
+      nodes.forEach(n => {
+        if(n.id!=='attacker'){
+          const an=nodes[0], dx=n.x-an.x, dy=n.y-an.y;
+          h+=`<div class="connection-line active" style="left:${an.x}%;top:${an.y}%;width:${Math.sqrt(dx*dx+dy*dy)}%;transform:rotate(${Math.atan2(dy,dx)*180/Math.PI}deg);"></div>`;
+        }
+      });
+      nodes.forEach(n => h+=`<div class="network-node ${n.class||''}" style="left:${n.x}%;top:${n.y}%;">${n.label}</div>`);
+      h+='</div>';
+      return h;
+    }
+
+    function createQueryBuilder() {
+      const parts = ['EventID=4624','LogonType=3','same_user','multiple_targets','| stats count by user','| where count > 3'];
+      let h='<p style="color:#8ab0d4;">🧩 Query Builder (drag parts):</p><div style="display:flex;gap:1rem;">';
+      h+='<div style="flex:1;"><div class="query-builder">';
+      parts.forEach(p=>h+=`<span class="query-part" draggable="true" data-part="${p}">${p}</span>`);
+      h+='</div></div><div style="flex:1;"><div class="query-builder" id="queryDropZone"><span class="query-slot" id="querySlot">Drop here...</span></div></div></div>';
+      return h;
+    }
+
+    function initDnD() {
+      document.querySelectorAll('.query-part').forEach(p=>{
+        p.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',e.target.dataset.part);});
+      });
+      const dz=document.getElementById('queryDropZone');
+      if(dz){
+        dz.addEventListener('dragover',e=>e.preventDefault());
+        dz.addEventListener('drop',e=>{
+          e.preventDefault();
+          const d=e.dataTransfer.getData('text/plain');
+          const s=document.getElementById('querySlot'); if(s){s.textContent=d;s.classList.add('filled');}
+        });
+      }
+    }
+
+    function renderTasks() {
+      if(!currentUser) return;
+      document.getElementById('displayStudentName').innerText=currentUser.name;
+      const c=document.getElementById('taskContainer'), done=currentUser.completedTasks||[];
+      let h='<h3>🕸️ Pass-the-Hash Investigation</h3>';
+      h+=createNetworkMap();
+      h+='<p style="font-size:0.75rem;color:#8ab0d4;">🔴 Compromised | 🟠 Attacker</p>';
+      h+=createQueryBuilder();
+      tasks.forEach(t=>{
+        const dn=done.includes(t.id);
+        h+=`<div class="task-card" style="border-left-color:${dn?'#2ecc71':'#4da6ff'};"><strong>${t.title}</strong> <span class="badge">${dn?'✅ Done':'🔒 Pending'}</span><p>${t.desc}</p>`;
+        if(t.extra==='hypothesis'){
+          h+='<div style="display:flex;flex-direction:column;gap:0.3rem;">';
+          ["same account multiple machines","single failed logon","normal activity","service restart"].forEach(o=>{
+            h+=`<label style="cursor:pointer;padding:0.3rem 0.5rem;border-radius:1rem;background:#0d0d28;border:1px solid #2a3d5a;"><input type="radio" name="hyp" value="${o}" ${dn?'disabled':''}> ${o}</label>`;
+          });
+          h+='</div>'; if(!dn) h+='<button onclick="window.submitHyp()" style="margin-top:0.5rem;">✅ Submit</button>';
+        } else if(t.extra==='logs4624'){
+          logonEvents.forEach(l=>h+=`<div class="log-line" style="${l.includes('svc_backup')?'border-left:3px solid #ff4444;':''}">${l}${l.includes('svc_backup')?' ⚠️':''}</div>`);
+        } else if(t.extra==='zeekLogs'){
+          h+='<div class="log-line" style="border-left:3px solid #ff8800;">ntlm: 10.0.1.50 → multiple servers | svc_backup</div>';
+        } else if(t.extra==='whitelist'){
+          h+=`<div class="log-line">✅ Whitelist: ${whitelist.join(', ')}</div>`;
+          h+='<div class="log-line" style="border-left:3px solid #ff4444;">🔍 svc_backup → NOT FOUND</div>';
+        }
+        if(!dn&&t.extra!=='hypothesis') h+=`<div style="display:flex;gap:0.5rem;margin-top:0.5rem;"><input type="text" id="ai${t.id}" placeholder="Your answer" style="flex:1;"><button onclick="window.submitT(${t.id})">✅ Submit</button></div>`;
+        else if(dn) h+='<p class="success-msg">✔ Completed</p>';
+        h+='</div>';
+      });
+      if(done.length===tasks.length) h+='<div class="flag-box">🏆 FLAG{PASS_THE_HASH_HUNT} 🏆</div>';
+      c.innerHTML=h; setTimeout(initDnD,100);
+    }
+
+    window.submitHyp = () => {
+      if(!currentUser) return;
+      const s=document.querySelector('input[name="hyp"]:checked');
+      if(!s){showToast('Select hypothesis.',true);return;}
+      if(s.value===tasks[0].answer){if(!currentUser.completedTasks.includes(1)){currentUser.completedTasks.push(1);saveProgress();}showToast('✅ Correct!');renderTasks();}
+      else showToast('❌ Incorrect.',true);
+    };
+    window.submitT = id => {
+      if(!currentUser) return;
+      const inp=document.getElementById('ai'+id); if(!inp) return;
+      const a=inp.value.trim(), t=tasks.find(x=>x.id===id); if(!t) return;
+      if(a.toLowerCase()===t.answer.toLowerCase()){
+        if(!currentUser.completedTasks.includes(id)){currentUser.completedTasks.push(id);saveProgress();}
+        showToast('✅ Correct!'); renderTasks();
+      } else { showToast('❌ Incorrect.',true); inp.style.animation='shake 0.5s ease'; setTimeout(()=>inp.style.animation='',500); }
+    };
+
+    function showLogin() { document.getElementById('loginSection').classList.remove('hidden'); document.getElementById('studentDashboard').classList.add('hidden'); currentUser=null; }
+    function showDash() { document.getElementById('loginSection').classList.add('hidden'); document.getElementById('studentDashboard').classList.remove('hidden'); renderTasks(); }
+
+    document.addEventListener('DOMContentLoaded',()=>{
+      const sn=loadProgress(); if(sn) document.getElementById('studentNameInput').value=sn;
+      document.getElementById('studentSubmitLogin').addEventListener('click',()=>{
+        const n=document.getElementById('studentNameInput').value.trim();
+        const p=document.getElementById('studentPassInput').value.trim();
+        if(!n||!p){showToast('Enter name and password.',true);return;}
+        if(p!==FIXED_PASSWORD){showToast('Invalid password. Use: 45_2026',true);return;}
+        currentUser={name:n,completedTasks:[...completedTasks]};
+        document.getElementById('studentPassInput').value=''; showDash();
+      });
+      document.getElementById('logoutStudentBtn').addEventListener('click',()=>{showToast('Logged out.');showLogin();});
+      const s=document.createElement('style'); s.textContent='@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}';
+      document.head.appendChild(s); showLogin();
+    });
+})();
+</script>
+</body>
+</html>
